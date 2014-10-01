@@ -1,5 +1,6 @@
-ScheduleGenerator
-=================
+# ScheduleGenerator
+
+[Trello board](https://trello.com/b/iC9wgjTb/scs-schedule-generator) for project organization
 
 This project is comprised of 3 parts.
 
