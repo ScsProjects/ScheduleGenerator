@@ -1,10 +1,11 @@
 # 
 # Concordia Schedule Scraper
-# Author: Jeremy Brown
+# Author: Jeremy Brown, Lance Lafontaine.
 # 
 # Basis for the scraper.
 # Grabs the HTML for the course page of all 5 departments.
 # Outputs to separate files
+# Isolates all course information found within all <b></b> tags of each document.
 # 
 # Class Schedule Site POST Parameters
 # Year: '2013', '2014'
@@ -44,7 +45,11 @@ departments = {'as': '01',
 for key, value in departments.items(): # python2: departments.iteritems()
     html = urlopen(BASE_URL, gen_values(value)).read()
     soup = BeautifulSoup(html, "lxml")
-        
-    # Can output site html to files
-    write_file("%s.html" % key, soup.prettify())
+    
+    # Isolates all relevent course information found in <b></b> tags
+    formatsoup = str(soup.find_all('b'))
+
+    # Outputs formatted site html to files
+    write_file("%s.html" % key, formatsoup)
+
 
