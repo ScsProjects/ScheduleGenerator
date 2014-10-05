@@ -36,9 +36,11 @@ def gen_values(dept, year='2014', session='A', level='A'):
     binary_values = urlencode(values).encode('ascii')
     return binary_values
 
-def write_file(name, str):
+def write_list_file(name, list):
     output_file = open(name, 'w')
-    output_file.write(str)
+    for item in list:
+        output_file.write("%s\n" % item) # Add's a new line character at the end of each list item.
+    output_file.close()
 
 departments = {'as': '01',
                 'jmsb': '03',
@@ -48,10 +50,9 @@ departments = {'as': '01',
 
 for key, value in departments.items(): # python2: departments.iteritems()
     html = urlopen(BASE_URL, gen_values(value)).read()
-    soup = BeautifulSoup(html, "lxml")
-    
-    # Isolates all relevent course information found in <b></b> tags
-    formatsoup = str(soup.find_all('b'))
+    soup = BeautifulSoup(html, "lxml",)
+
+    soup.prettify()
 
     # Outputs formatted site html to files
-    write_file("%s.html" % key, formatsoup)
+    write_list_file("%s.html" % key, soup.find_all("b")) #find_all() method returns a list. 
