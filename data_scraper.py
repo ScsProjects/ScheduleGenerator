@@ -7,15 +7,19 @@ __license__ = "MIT"
 
 # Basis for the scraper.
 # Grabs the HTML for the course page of all 5 departments.
-# Outputs to separate files
+# Parses the files to isolate and organize individual course data.
+# Outputs the data to separate files for each department.
+# 
 # Isolates all course information found within all <b></b> tags of each document.
 
+import bs4
 from bs4 import BeautifulSoup
+from bs4 import SoupStrainer
 from urllib.request import urlopen # python2: from urllib2 import urlopen
 from urllib.parse import urlencode
 
+# Url of course schedule page to scrape
 BASE_URL = "http://fcms.concordia.ca/fcms/asc002_stud_all.aspx"
-
 
 def gen_values(dept, year='2014', session='A', level='A'):
     """
@@ -36,23 +40,133 @@ def gen_values(dept, year='2014', session='A', level='A'):
     binary_values = urlencode(values).encode('ascii')
     return binary_values
 
+
 def write_list_file(name, list):
     output_file = open(name, 'w')
     for item in list:
         output_file.write("%s\n" % item) # Add's a new line character at the end of each list item.
     output_file.close()
 
+
+# List of departments and their respective codes as identified by the webpage
 departments = {'as': '01',
                 'jmsb': '03',
                 'encs': '04',
                 'fa': '06',
                 'el': '09'}
 
+# Course object definition
+class Course:
+    def __init__(self):
+        self.code = ""
+        self.name = ""
+        self.credits = ""
+        self.prereq = ""
+        self.special_note = ""
+        self.term_number = ""
+        self.times = []
+    
+# Time object definition
+class Time:
+    def __init__(self, session, name, time, location, prof=""):
+        self.session = session
+        self.name = name
+        self.time = time
+        self.location = location
+        self.prof = prof
+
+
+# Main Script
 for key, value in departments.items(): # python2: departments.iteritems()
     html = urlopen(BASE_URL, gen_values(value)).read()
-    soup = BeautifulSoup(html, "lxml",)
+    strainer = SoupStrainer(id="ctl00_PageBody_tblBodyShow1")
+    soup_table = BeautifulSoup(html, "lxml", parse_only=strainer)
+    # Select courses table
+    courses = soup_table.find_all("tr", bgcolor="LightBlue")
 
-    soup.prettify()
+    out_file = open("out_%s.txt" % key, "a") # appends to file, so remember to delete old copy if testing
 
-    # Outputs formatted site html to files
-    write_list_file("%s.html" % key, soup.find_all("b")) #find_all() method returns a list. 
+    # Iterates through all the first rows of a course (LightBlue rows)
+    for c in courses:
+        course_obj = Course()
+        # Data in first row
+        course_obj.code = c.contents[2].contents[0].contents[0].string
+        course_obj.name = c.contents[3].contents[0].contents[0].string
+        course_obj.credits = c.contents[4].contents[0].contents[0].string
+
+        row = c.next_sibling
+        
+        # Data in following rows of the same course
+        while (type(row) == bs4.element.Tag and row.has_attr('bgcolor') and row['bgcolor'] != "LightBlue" and not (row['bgcolor'] == "White" and not row.has_attr('align'))):
+            row_data = row.contents
+            
+            # Prerequisite row, if present
+            if str(row_data[2].contents[0].string).find("Prerequisite:") != -1:
+                course_obj.prereq = row_data[3].contents[0].string
+            
+            # Special note row, if present
+            elif str(row_data[2].contents[0].string).find("Special Note:") != -1:
+                course_obj.special_note = row_data[3].contents[0].string
+            
+            # Row containing a session, name, time, location, prof
+            elif len(row_data) > 5 and row_data[2].contents[0].contents and len(row_data) > 5 and (str(row_data[2].contents[0].contents[0].string) == "/1" or str(row_data[2].contents[0].contents[0].string) == "/2" or str(row_data[2].contents[0].contents[0].string) == "/3" or str(row_data[2].contents[0].contents[0].string) == "/4"):
+                # Course session
+                s = row_data[2].contents[0].contents[0].string
+                
+                # Course time name
+                n = ""
+                for d in row_data[3].contents[0].find_all('b'):
+                    n += d.string + " "
+                
+                # Course time **Broken for awkward format (2 times in one cell, ex. CATS 631E)
+                t = ""
+                if len(row_data[4].contents[0].find_all('b')) > 1:
+                    t = row_data[4].contents[0].find_all('b')[0] + " "
+                    t += row_data[4].contents[0].find_all('b')[2].contents[0]
+                
+                # Course location **Broken for awkward format (2 locations in one cell, ex. CATS 631E)
+                l = row_data[5].contents[0].contents[0].string
+                
+                # Course Prof **Is it broken for awkward format?
+                if len(row_data) > 6:
+                    p = ""
+                    for g in range(len(row_data[6].contents[0].contents[0].contents)):
+                        if (g % 2 == 0):
+                            p += row_data[6].contents[0].contents[0].contents[g] + " "
+                else:
+                    p = ""
+
+                time = Time(session=s, name=n, time=t, location=l, prof=p)
+                course_obj.times.append(time)
+
+            row = row.next_sibling
+        
+        # TEMP Writing course object to output file
+        out_file.write(course_obj.code)
+        out_file.write("\n")
+        out_file.write(course_obj.name)
+        out_file.write("\n")
+        out_file.write(course_obj.credits)
+        out_file.write("\n")
+        if course_obj.prereq:
+            out_file.write(course_obj.prereq)
+            out_file.write("\n")
+        if course_obj.special_note:
+            out_file.write(course_obj.special_note)
+            out_file.write("\n")
+        for t in course_obj.times:
+            out_file.write(t.name)
+            out_file.write("\n")
+            out_file.write(t.session)
+            out_file.write("\n")
+            out_file.write(t.time)
+            out_file.write("\n")
+            out_file.write(t.location)
+            out_file.write("\n")
+            if t.prof:
+                out_file.write(t.prof)
+                out_file.write("\n")
+
+        out_file.write("\n")
+
+    out_file.close()
