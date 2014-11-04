@@ -10,13 +10,20 @@ __license__ = "MIT"
 # Parses the files to isolate and organize individual course data.
 # Outputs the data to separate files for each department.
 # 
-# Isolates all course information found within all <b></b> tags of each document.
+# TO DO
+# - Consider cancelled classes
+# - Merge awkward format of times and locations
+# - Link associated lectures and tutorials/labs/etc.
 
 from bs4.element import Tag
 from bs4 import BeautifulSoup
 from bs4 import SoupStrainer
-from urllib.request import urlopen # python2: from urllib2 import urlopen
+
+from urllib.request import urlopen
 from urllib.parse import urlencode
+
+#from pymongo import MongoClient
+
 
 # Url of course schedule page to scrape
 BASE_URL = "http://fcms.concordia.ca/fcms/asc002_stud_all.aspx"
@@ -57,149 +64,132 @@ def create_soup(value, strainer=None):
     else:
         return BeautifulSoup(html, "lxml")
     
-def extract_course_data(c):
+def parse_data(c):
     """
     Extracts all that data related to a given course with the course's first row as a reference
     Returns a Course object containing the structured data
     """
-    course_obj = Course()
+    course_model = {}
     # Data in first row
-    course_obj.code = c.contents[2].contents[0].contents[0].string
-    course_obj.name = c.contents[3].contents[0].contents[0].string
-    course_obj.credits = c.contents[4].contents[0].contents[0].string
+    course_model['code'] = str(c.contents[2].contents[0].contents[0].string).strip()
+    course_model['name'] = str(c.contents[3].contents[0].contents[0].string).strip()
+    course_model['credits'] = str(c.contents[4].contents[0].contents[0].string).strip()
 
     row = c.next_sibling
-
+    
+    course_model['times'] = []
+    
     # Data in following rows of the same course
     while (type(row) == Tag and row.has_attr('bgcolor') and row['bgcolor'] != "LightBlue" and not (row['bgcolor'] == "White" and not row.has_attr('align'))):
         row_data = row.contents
 
         # Prerequisite row, if present
         if str(row_data[2].contents[0].string).find("Prerequisite:") != -1:
-            course_obj.prereq = row_data[3].contents[0].string
+            course_model['prereq'] = str(row_data[3].contents[0].string).strip()
 
         # Special note row, if present
         elif str(row_data[2].contents[0].string).find("Special Note:") != -1:
-            course_obj.special_note = row_data[3].contents[0].string
+            course_model['special_note'] = str(row_data[3].contents[0].string).strip()
 
         # Row containing a session, name, time, location, prof
         elif len(row_data) > 5 and row_data[2].contents[0].contents and len(row_data) > 5 and (str(row_data[2].contents[0].contents[0].string) == "/1" or str(row_data[2].contents[0].contents[0].string) == "/2" or str(row_data[2].contents[0].contents[0].string) == "/3" or str(row_data[2].contents[0].contents[0].string) == "/4"):
             # Course session
-            s = row_data[2].contents[0].contents[0].string
+            s = str(row_data[2].contents[0].contents[0].string).strip()
 
             # Course time name
             n = ""
             for d in row_data[3].contents[0].find_all('b'):
-                n += d.string + " "
+                n += str(d.string + " ").strip()
 
             # Course time
             if len(row_data[4].contents[0].find_all('b')[0].contents) > 1:
-                t = row_data[4].contents[0].contents[0].contents[0].string + " "
-                t += row_data[4].contents[0].contents[0].contents[2].string
+                t = str(row_data[4].contents[0].contents[0].contents[0].string + " ").strip()
+                t += str(row_data[4].contents[0].contents[0].contents[2].string).strip()
             else:
-                t = row_data[4].contents[0].contents[0].string
+                t = str(row_data[4].contents[0].contents[0].string).strip()
 
 
             # Course location
             if len(row_data[5].contents[0].contents[0].contents) > 1:
-                l = row_data[5].contents[0].contents[0].contents[0].string
-                l += row_data[5].contents[0].contents[0].contents[2].string
+                l = str(row_data[5].contents[0].contents[0].contents[0].string).strip()
+                l += str(row_data[5].contents[0].contents[0].contents[2].string).strip()
             else:
-                l = row_data[5].contents[0].contents[0].string
+                l = str(row_data[5].contents[0].contents[0].string).strip()
 
             # Course Prof
             if len(row_data) > 6:
-                p = ""
+                p = []
                 if (len(row_data[6].contents[0].contents[0].contents) > 1):
                     for g in range(0, len(row_data[6].contents[0].contents[0].contents)):
                         if (g % 2 == 0):
-                            p += row_data[6].contents[0].contents[0].contents[g] + " "
+                            p.append(str(row_data[6].contents[0].contents[0].contents[g]).strip())
                 else: 
-                    p = row_data[6].contents[0].contents[0].string
+                    p.append(str(row_data[6].contents[0].contents[0].string).strip())
             else:
-                p = ""
+                p = []
 
-            time = Time(session=s, name=n, time=t, location=l, prof=p)
-            course_obj.times.append(time)
+            time = {'name': n, 'session': s, 'time': t, 'location': l, 'professors': p}
+            course_model['times'].append(time)
 
         row = row.next_sibling
-    return course_obj    
+    return course_model    
     
-
-def write_list_file(name, list):
-    output_file = open(name, 'w')
-    for item in list:
-        output_file.write("%s\n" % item) # Add's a new line character at the end of each list item.
-    output_file.close()
-
-
-def write_obj_file(course_obj):
+def write_obj_file(course_model):
     """
     Outputs structured course data to a simple text file
-    Ouput fields: course code, name, credits, prerequisites, special notes, times (name, session, time, location, prof)
+    Ouput fields: course code, name, credits, prerequisites, special notes, times (name, session, time, location, professor)
     """
-    
     out_file = open("out_%s.txt" % key, "a") # appends to file, so remember to delete old copy if testing
     
     # TEMP Writing course object to output file
-    out_file.write(course_obj.code)
+    out_file.write(course_model['code'])
     out_file.write("\n")
-    out_file.write(course_obj.name)
+    out_file.write(course_model['name'])
     out_file.write("\n")
-    out_file.write(course_obj.credits)
+    out_file.write(course_model['credits'])
     out_file.write("\n")
-    if course_obj.prereq:
-        out_file.write(course_obj.prereq)
+    if 'prereq' in course_model:
+        out_file.write(course_model['prereq'])
         out_file.write("\n")
-    if course_obj.special_note:
-        out_file.write(course_obj.special_note)
+    if 'special_note' in course_model:
+        out_file.write(course_model['special_note'])
         out_file.write("\n")
-    for t in course_obj.times:
-        out_file.write(t.name)
+    for t in course_model['times']:
+        out_file.write(t['name'])
         out_file.write("\n")
-        out_file.write(t.session)
+        out_file.write(t['session'])
         out_file.write("\n")
-        out_file.write(t.time)
+        out_file.write(t['time'])
         out_file.write("\n")
-        out_file.write(t.location)
+        out_file.write(t['location'])
         out_file.write("\n")
-        if t.prof:
-            out_file.write(t.prof)
-            out_file.write("\n")
+        if 'professors' in t:
+            for p in t['professors']:
+                out_file.write(p)
+                out_file.write("\n")
 
     out_file.write("\n")
     out_file.close()
 
-# Course object definition
-class Course:
-    def __init__(self):
-        self.code = ""
-        self.name = ""
-        self.credits = ""
-        self.prereq = ""
-        self.special_note = ""
-        self.term_number = ""
-        self.times = []
-    
-# Time object definition
-class Time:
-    def __init__(self, session, name, time, location, prof=""):
-        self.session = session
-        self.name = name
-        self.time = time
-        self.location = location
-        self.prof = prof
-
 
 # Main Script
+
+#client = MongoClient()
+#db = client.schedule_generator
+#courses = db.courses
+
+# Run through the course pages of all departments
 for key, value in departments.items(): # python2: departments.iteritems()
     strainer = SoupStrainer(id="ctl00_PageBody_tblBodyShow1")
     soup_table = create_soup(value, strainer)
     # Select courses table
-    courses = soup_table.find_all("tr", bgcolor="LightBlue")
+    courses_table = soup_table.find_all("tr", bgcolor="LightBlue")
     
     # Iterates through all the first rows of a course (LightBlue rows)
-    for c in courses:
-        course_obj = extract_course_data(c)
-        write_obj_file(course_obj)
+    #course_list = []
+    for c in courses_table:
+        course_model = parse_data(c)
+        write_obj_file(course_model)
+        #course_list.append(course_model)
         
+    #courses.insert(course_list)
